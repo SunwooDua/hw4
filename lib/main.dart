@@ -180,7 +180,7 @@ class _EmailPasswordFormState extends State<EmailPasswordForm> {
         MaterialPageRoute(
           builder:
               (context) =>
-                  ProfileScreen(userEmail: _userEmail, auth: widget.auth),
+                  MessageBoardList(userEmail: _userEmail, auth: widget.auth),
         ),
       );
     } catch (e) {
@@ -344,6 +344,162 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class MessageBoard extends StatefulWidget {
+  // messageboard where you can send and see messages
+  final FirebaseAuth auth;
+  final String userEmail;
+  final String boardName;
+
+  MessageBoard({
+    required this.auth,
+    required this.userEmail,
+    required this.boardName,
+  });
+
+  @override
+  State<MessageBoard> createState() => _MessageBoardState();
+}
+
+class _MessageBoardState extends State<MessageBoard> {
+  final TextEditingController _messageController = TextEditingController();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  // need datetime, message, name
+  Future<void> _sendMessages() async {
+    if (_messageController.text.trim().isEmpty)
+      return; // when empty just return
+
+    await _firestore
+        .collection('messageBoard')
+        .doc(widget.boardName)
+        .collection('messages')
+        .add({
+          'text': _messageController.text.trim(), // messages
+          'time': FieldValue.serverTimestamp(), // datetime
+          'name': widget.userEmail,
+        });
+    _messageController.clear(); // clear after done
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.boardName),
+        backgroundColor: Colors.blue,
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: // update when messages in firestore changes
+                  FirebaseFirestore.instance
+                      .collection('messageBoard')
+                      .doc(widget.boardName)
+                      .collection('messages')
+                      .orderBy('time', descending: true)
+                      .snapshots(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) {
+                  // when there is no data, show circularprogressindicator
+                  return Center(child: CircularProgressIndicator());
+                }
+
+                final messages =
+                    snapshot.data!.docs; // if data, show all the messages
+
+                return ListView.builder(
+                  itemCount: messages.length,
+                  itemBuilder: (context, index) {
+                    var message = messages[index];
+                    var data = message.data() as Map<String, dynamic>;
+                    var time = '';
+                    if (data['time'] != null) {
+                      var formattedTime = (data['time'] as Timestamp).toDate();
+                      time = '${formattedTime.hour}:${formattedTime.minute}';
+                    }
+                    return ListTile(
+                      title: Text(data['text'] ?? ''), // message
+                      subtitle: Text(data['name'] ?? ''), // user name
+                      trailing: Text(time),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+          Divider(),
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _messageController,
+                    decoration: InputDecoration(labelText: 'Enter Message'),
+                  ),
+                ),
+                IconButton(onPressed: _sendMessages, icon: Icon(Icons.send)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class MessageBoardList extends StatelessWidget {
+  final FirebaseAuth auth;
+  final String userEmail;
+
+  const MessageBoardList({
+    super.key,
+    required this.auth,
+    required this.userEmail,
+  });
+  // since hard code is allowed
+  final List<Map<String, dynamic>> boards = const [
+    {'name': 'Discussion', 'icon': Icons.chat_bubble},
+    {'name': 'Study', 'icon': Icons.school},
+    {'name': 'Game', 'icon': Icons.videogame_asset},
+    {'name': 'Meme', 'icon': Icons.image},
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Message Boards'),
+        backgroundColor: Colors.blueAccent,
+      ),
+      body: ListView.builder(
+        itemCount: boards.length, // hardcoded boards
+        itemBuilder: (context, index) {
+          final board = boards[index];
+          return ListTile(
+            leading: Icon(board['icon'], color: Colors.blue),
+            title: Text(board['name']),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder:
+                      (context) => MessageBoard(
+                        auth: auth,
+                        userEmail: userEmail,
+                        boardName: board['name'],
+                      ),
+                ),
+              );
+            },
+          );
+        },
       ),
     );
   }
