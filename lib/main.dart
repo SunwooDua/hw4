@@ -65,15 +65,39 @@ class _RegisterEmailSectionState extends State<RegisterEmailSection> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
+  final TextEditingController _firstNameController = TextEditingController();
+  final TextEditingController _lastNameController = TextEditingController();
+
   bool _success = false;
   bool _initialState = true;
   String? _userEmail;
+
   void _register() async {
+    String displayName = '';
+
     try {
-      await widget.auth.createUserWithEmailAndPassword(
-        email: _emailController.text,
-        password: _passwordController.text,
-      );
+      UserCredential userCredential = await widget.auth
+          .createUserWithEmailAndPassword(
+            email: _emailController.text,
+            password: _passwordController.text,
+          );
+
+      User? user = userCredential.user;
+
+      if (user != null) {
+        await user.updateProfile(
+          displayName:
+              "${_firstNameController.text} ${_lastNameController.text}",
+        );
+        await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+          'email': user.email,
+          'firstName': _firstNameController.text,
+          'lastName': _lastNameController.text,
+          'role': 'user', // default is user
+          'registeredDate': Timestamp.now(), // when user registered
+        });
+      }
+
       setState(() {
         _success = true;
         _userEmail = _emailController.text;
@@ -265,8 +289,42 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  final TextEditingController _newPasswordController = TextEditingController();
+  final TextEditingController _newPasswordController =
+      TextEditingController(); // change password
+  // change information
+  final TextEditingController _firstNameController = TextEditingController();
+  final TextEditingController _lastNameController = TextEditingController();
+  final TextEditingController _roleController = TextEditingController();
+  String? _registrationDate;
+
   final _formKey = GlobalKey<FormState>();
+  @override
+  void initState() {
+    super.initState();
+    _loadProfile();
+  }
+
+  void _loadProfile() async {
+    final user = widget.auth.currentUser;
+    if (user != null) {
+      final doc =
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .get();
+      final data = doc.data();
+      if (data != null) {
+        _firstNameController.text = data['firstName'] ?? '';
+        _lastNameController.text = data['lastName'] ?? '';
+        _roleController.text = data['role'] ?? '';
+        Timestamp? timestamp = data['registeredAt'];
+        if (timestamp != null) {
+          _registrationDate = timestamp.toDate().toString();
+        }
+        setState(() {});
+      }
+    }
+  }
 
   // Logout function
   void _signOut(BuildContext context) async {
@@ -305,46 +363,118 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  void _changeProfile(BuildContext context) async {
+    if (_formKey.currentState?.validate() ?? false) {
+      // Get current user
+      User? user = widget.auth.currentUser;
+
+      // Update the profile
+      if (user != null) {
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .update({
+              'firstName': _firstNameController.text,
+              'lastName': _lastNameController.text,
+              'role': _roleController.text,
+            });
+
+        await user.updateDisplayName(
+          "${_firstNameController.text} ${_lastNameController.text}",
+        );
+        await user.reload(); // Reload to get the updated user data
+        user = widget.auth.currentUser;
+
+        _loadProfile();
+
+        setState(() {});
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Profile changed successfully!')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final user = widget.auth.currentUser;
+
     return Scaffold(
-      appBar: AppBar(title: Text("Profile"), backgroundColor: Colors.blue),
-      body: Column(
-        children: [
-          Center(child: Text('Welcome, ${widget.userEmail}')),
-          ElevatedButton(
+      appBar: AppBar(
+        title: Text("Profile"),
+        backgroundColor: Colors.blue,
+        actions: [
+          IconButton(
             onPressed: () => _signOut(context),
-            child: Text('logout'),
-          ),
-          SizedBox(height: 20),
-          Form(
-            key: _formKey,
-            child: Column(
-              children: [
-                TextFormField(
-                  controller: _newPasswordController,
-                  obscureText: true,
-                  decoration: InputDecoration(labelText: 'New Password'),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter a password';
-                    }
-                    if (value.length < 6) {
-                      return 'Password must be at least 6 characters';
-                    }
-                    return null;
-                  },
-                ),
-                SizedBox(height: 20),
-                ElevatedButton(
-                  onPressed: () => _changePassword(context),
-                  child: Text('Change Password'),
-                ),
-              ],
-            ),
+            icon: Icon(Icons.logout),
           ),
         ],
       ),
+      body:
+          user == null
+              ? Center(
+                child: Text("No User is Signed in"),
+              ) // if no user is signed in
+              : Form(
+                key: _formKey,
+                child: ListView(
+                  children: [
+                    Text("email : ${user.email}"),
+                    Text("Name : ${user.displayName}"),
+                    Text("Role : ${_roleController.text}"),
+                    Text("Info : ${user.metadata}"),
+                    SizedBox(height: 20),
+                    TextFormField(
+                      controller: _firstNameController,
+                      decoration: InputDecoration(labelText: "First Name"),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please Enter a First Name';
+                        }
+                        return null;
+                      },
+                    ),
+                    TextFormField(
+                      controller: _lastNameController,
+                      decoration: InputDecoration(labelText: 'Last Name'),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please Enter a Last Name';
+                        }
+                        return null;
+                      },
+                    ),
+                    TextFormField(
+                      controller: _roleController,
+                      decoration: InputDecoration(labelText: 'Role'),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please Enter a Role';
+                        }
+                        return null;
+                      },
+                    ),
+                    Text('Registerd at : $_registrationDate'),
+                    SizedBox(height: 16),
+                    ElevatedButton(
+                      onPressed: () => _changeProfile(context),
+                      child: Text('Save Changed Profile Info'),
+                    ),
+                    Divider(),
+                    TextFormField(
+                      controller: _newPasswordController,
+                      decoration: InputDecoration(labelText: 'New Password'),
+                      obscureText: true,
+                    ),
+                    SizedBox(height: 12),
+                    ElevatedButton(
+                      onPressed: () => _changePassword(context),
+                      child: Text('Change Password'),
+                    ),
+                  ],
+                ),
+              ),
     );
   }
 }
@@ -477,6 +607,46 @@ class MessageBoardList extends StatelessWidget {
       appBar: AppBar(
         title: Text('Message Boards'),
         backgroundColor: Colors.blueAccent,
+      ),
+      drawer: Drawer(
+        child: ListView(
+          children: [
+            DrawerHeader(
+              decoration: BoxDecoration(color: Colors.blue),
+              child: Text('Pages'),
+            ),
+            ListTile(
+              leading: Icon(Icons.person),
+              title: Text("Profile"),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder:
+                        (context) =>
+                            ProfileScreen(userEmail: userEmail, auth: auth),
+                  ),
+                );
+              },
+            ),
+            // ListTile(
+            //   leading: Icon(Icons.settings),
+            //   title: Text("Setting"),
+            //   onTap: () {
+            //     Navigator.pop(context);
+            //     Navigator.push(
+            //       context,
+            //       MaterialPageRoute(
+            //         builder:
+            //             (context) =>
+            //                 ProfileScreen(userEmail: userEmail, auth: auth),
+            //       ),
+            //     );
+            //   },
+            // ),
+          ],
+        ),
       ),
       body: ListView.builder(
         itemCount: boards.length, // hardcoded boards
